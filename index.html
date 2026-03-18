@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <style>
+    body { margin: 0; padding: 0; background-color: black; color: white; font-family: sans-serif; overflow: hidden; }
+    video { width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: none; }
+    #status { font-size: 28px; color: #FFCC00; background: rgba(0,0,0,0.6); padding: 15px 30px; border-radius: 15px; margin-bottom: 20px; font-weight: bold; }
+    #count { font-size: 160px; color: #00FF88; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline></video>
+  <div id="overlay">
+    <div id="status">AI Laden... (Sta even stil)</div>
+    <div id="count">0</div>
+  </div>
+  <script>
+    const videoElement = document.getElementById('video');
+    const statusElement = document.getElementById('status');
+    const countElement = document.getElementById('count');
+
+    let count = 0;
+    let stage = "hoog";
+
+    function calculateAngle(a, b, c) {
+      let radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let angle = Math.abs(radians * 180.0 / Math.PI);
+      return angle > 180.0 ? 360 - angle : angle;
+    }
+
+    function onResults(results) {
+      if (!results.poseLandmarks) return;
+      const lShoulder = results.poseLandmarks[11];
+      const lElbow = results.poseLandmarks[13];
+      const lWrist = results.poseLandmarks[15];
+
+      if (lShoulder && lElbow && lWrist) {
+         const angle = calculateAngle(lShoulder, lElbow, lWrist);
+         if (angle > 150) {
+            if (stage !== "hoog") statusElement.innerText = "Zakken maar!";
+            stage = "hoog";
+         }
+         if (angle < 90 && stage === "hoog") {
+            stage = "laag";
+            count++;
+            countElement.innerText = count;
+            statusElement.innerText = "En door!!";
+            // Stuur het nummer naar de iPhone app
+            window.ReactNativeWebView.postMessage(count.toString());
+         }
+      }
+    }
+
+    const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+    pose.setOptions({ modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    pose.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await pose.send({image: videoElement}); },
+      width: 640, height: 480
+    });
+    
+    camera.start().then(() => statusElement.innerText = "Klaar! Start je pushups.");
+  </script>
+</body>
+</html>
