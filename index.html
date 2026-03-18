@@ -1,23 +1,30 @@
 <!DOCTYPE html>
-<html>
+<html lang="nl">
 <head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pushup AI</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <style>
-    body { margin: 0; padding: 0; background-color: black; color: white; font-family: sans-serif; overflow: hidden; }
+    body { margin: 0; padding: 0; background-color: #000; color: white; font-family: -apple-system, sans-serif; overflow: hidden; }
     video { width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); }
-    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: none; }
-    #status { font-size: 28px; color: #FFCC00; background: rgba(0,0,0,0.6); padding: 15px 30px; border-radius: 15px; margin-bottom: 20px; font-weight: bold; }
-    #count { font-size: 160px; color: #00FF88; font-weight: bold; }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; align-items: center; pointer-events: none; padding: 60px 0; box-sizing: border-box; }
+    #status-box { background: rgba(0,0,0,0.7); padding: 15px 30px; border-radius: 20px; text-align: center; max-width: 80%; }
+    #status { font-size: 24px; color: #FFCC00; font-weight: bold; margin: 0; }
+    #count { font-size: 140px; color: #00FF88; font-weight: bold; text-shadow: 0px 4px 20px rgba(0,255,136,0.4); margin-bottom: 50px; }
   </style>
 </head>
 <body>
   <video id="video" autoplay playsinline></video>
+  
   <div id="overlay">
-    <div id="status">AI Laden... (Sta even stil)</div>
+    <div id="status-box">
+      <p id="status">AI Laden...</p>
+    </div>
     <div id="count">0</div>
   </div>
+
   <script>
     const videoElement = document.getElementById('video');
     const statusElement = document.getElementById('status');
@@ -34,29 +41,65 @@
 
     function onResults(results) {
       if (!results.poseLandmarks) return;
+      
       const lShoulder = results.poseLandmarks[11];
+      const rShoulder = results.poseLandmarks[12];
       const lElbow = results.poseLandmarks[13];
+      const rElbow = results.poseLandmarks[14];
       const lWrist = results.poseLandmarks[15];
+      const rWrist = results.poseLandmarks[16];
 
-      if (lShoulder && lElbow && lWrist) {
-         const angle = calculateAngle(lShoulder, lElbow, lWrist);
-         if (angle > 150) {
-            if (stage !== "hoog") statusElement.innerText = "Zakken maar!";
-            stage = "hoog";
+      // 1. Ziet de AI beide armen goed?
+      const isVisible = (lShoulder.visibility > 0.6 && rShoulder.visibility > 0.6 &&
+                         lElbow.visibility > 0.6 && rElbow.visibility > 0.6 &&
+                         lWrist.visibility > 0.6 && rWrist.visibility > 0.6);
+
+      if (!isVisible) {
+          statusElement.innerText = "Zorg dat je armen en schouders in beeld zijn!";
+          statusElement.style.color = "white";
+          return;
+      }
+
+      // 2. Staan de schouders horizontaal? (Max 20% afwijking)
+      const isLevel = Math.abs(lShoulder.y - rShoulder.y) < 0.2;
+      // 3. Staan je handen op de grond? (Polsen moeten op het scherm lager zijn dan de schouders)
+      const handsDown = lWrist.y > lShoulder.y && rWrist.y > rShoulder.y;
+
+      if (!isLevel || !handsDown) {
+          statusElement.innerText = "Neem de push-up houding aan op de grond!";
+          statusElement.style.color = "orange";
+          return;
+      }
+
+      // 4. Als je in de goede houding staat, berekenen we de hoek van BEIDE armen
+      const lAngle = calculateAngle(lShoulder, lElbow, lWrist);
+      const rAngle = calculateAngle(rShoulder, rElbow, rWrist);
+
+      // BEIDE armen moeten gestrekt zijn (boven de 150 graden)
+      if (lAngle > 150 && rAngle > 150) {
+         if (stage !== "hoog") {
+            statusElement.innerText = "Zakken maar!";
+            statusElement.style.color = "#FFCC00";
          }
-         if (angle < 90 && stage === "hoog") {
-            stage = "laag";
-            count++;
-            countElement.innerText = count;
-            statusElement.innerText = "En door!!";
-            // Stuur het nummer naar de iPhone app
-            window.ReactNativeWebView.postMessage(count.toString());
+         stage = "hoog";
+      }
+      
+      // BEIDE armen moeten diep doorbuigen (onder de 90 graden)
+      if (lAngle < 90 && rAngle < 90 && stage === "hoog") {
+         stage = "laag";
+         count++;
+         countElement.innerText = count;
+         statusElement.innerText = "En weer omhoog!!";
+         statusElement.style.color = "#00FF88";
+         
+         if (window.ReactNativeWebView) {
+             window.ReactNativeWebView.postMessage(count.toString());
          }
       }
     }
 
     const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
-    pose.setOptions({ modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
     pose.onResults(onResults);
 
     const camera = new Camera(videoElement, {
@@ -64,7 +107,9 @@
       width: 640, height: 480
     });
     
-    camera.start().then(() => statusElement.innerText = "Klaar! Start je pushups.");
+    camera.start().then(() => {
+        statusElement.innerText = "Klaar! Ga op de grond liggen.";
+    });
   </script>
 </body>
 </html>
